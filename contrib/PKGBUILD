@@ -1,0 +1,39 @@
+# Maintainer: Bruno Pagani (a.k.a. ArchangeGabriel) <archange@archlinux.org>
+# Contributor: Mirco Tischler <mt-ml at gmx dot de>
+
+pkgname=fwupd
+pkgver=dummy
+pkgrel=1
+pkgdesc='A simple daemon to allow session software to update firmware'
+arch=('i686' 'x86_64')
+url='https://github.com/fwupd/fwupd'
+license=('GPL2')
+depends=('libgusb' 'modemmanager' 'tpm2-tss')
+makedepends=('meson' 'valgrind' 'gobject-introspection' 'gtk-doc' 'python-pillow' 'git'
+             'python-cairo' 'noto-fonts' 'noto-fonts-cjk' 'python-gobject' 'vala'
+             'libsoup' 'polkit' 'gcab')
+
+pkgver() {
+    cd ${pkgname}
+
+    VERSION=$(./contrib/get-version.py | sed 's/-/.r/;s/-/./')
+    echo $VERSION
+}
+
+build() {
+    cd ${pkgname}
+    if [ -n "$CI" ]; then
+        export CI="--werror --wrap-mode=default"
+    fi
+    arch-meson -D b_lto=false $CI ../build
+
+    ninja -v -C ../build
+}
+
+check() {
+    ninja -C build test
+}
+
+package() {
+    DESTDIR="${pkgdir}" ninja -C build install
+}
