@@ -1,3 +1,10 @@
+fwupd (1.3.9-3ata2) vcs; urgency=medium
+
+  * Put atari patches in an atari subdir
+  * Only claim the usb interface in bootloader mode
+
+ -- Sjoerd Simons <sjoerd@debian.org>  Thu, 09 Apr 2020 15:09:39 +0200
+
 fwupd (1.3.9-3ata1) vcs; urgency=medium
 
   * Disable unneeded plugins (redfish, dell, thunderbolt, flashrom)
