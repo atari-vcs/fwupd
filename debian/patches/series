@@ -2,3 +2,4 @@
 0001-ci-build-Debian-using-libflashrom.patch
 0001-uefi-Don-t-use-shim-for-non-secure-boot-configuratio.patch
 dependencies-Don-t-build-with-flashrom-and-umock-support.patch
+Fix-compatibility-with-older-gnutls-versions.patch

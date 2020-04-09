@@ -1,0 +1,25 @@
+From: Sjoerd Simons <sjoerd@collabora.com>
+Date: Thu, 9 Apr 2020 10:30:54 +0200
+Subject: Fix compatibility with older gnutls versions
+
+Atari OS uses an older gnutls version which doesn't have
+gnutls_x509_dn_get_str2 yet.
+
+Signed-off-by: Sjoerd Simons <sjoerd@collabora.com>
+---
+ src/fu-keyring-pkcs7.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/fu-keyring-pkcs7.c b/src/fu-keyring-pkcs7.c
+index a42feaa..f59055b 100644
+--- a/src/fu-keyring-pkcs7.c
++++ b/src/fu-keyring-pkcs7.c
+@@ -567,7 +567,7 @@ fu_keyring_pkcs7_datum_to_dn_str (const gnutls_datum_t *raw)
+ 		return NULL;
+ 	str = (gnutls_datum_t *) gnutls_malloc (sizeof (gnutls_datum_t));
+ 	str->data = NULL;
+-	rc = gnutls_x509_dn_get_str2 (dn, str, 0);
++	rc = gnutls_x509_dn_get_str (dn, str);
+ 	if (rc < 0)
+ 		return NULL;
+ 	return g_strndup ((const gchar *) str->data, str->size);
