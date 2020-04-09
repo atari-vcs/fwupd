@@ -1,0 +1,29 @@
+From: Sjoerd Simons <sjoerd@collabora.com>
+Date: Thu, 9 Apr 2020 12:26:10 +0200
+Subject: Skip pkcs7 verify data test on older gnutls
+
+Old gnutls did not pass down the verifications flags (e.g. ignore time)
+down correctly so can't run this test.
+
+Signed-off-by: Sjoerd Simons <sjoerd@collabora.com>
+---
+ src/fu-self-test.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/fu-self-test.c b/src/fu-self-test.c
+index 9438e18..d19b264 100644
+--- a/src/fu-self-test.c
++++ b/src/fu-self-test.c
+@@ -2651,6 +2651,12 @@ fu_keyring_pkcs7_func (gconstpointer user_data)
+ 	g_autoptr(GBytes) blob_sig2 = NULL;
+ 	g_autoptr(GError) error = NULL;
+ 
++#ifndef HAVE_GNUTLS_3_6_0
++	/* required to create the use verification flags correctly */
++	g_test_skip ("GnuTLS version too old");
++	return;
++#endif
++
+ 	/* add keys to keyring */
+ 	keyring = fu_keyring_pkcs7_new ();
+ 	ret = fu_keyring_setup (keyring, &error);

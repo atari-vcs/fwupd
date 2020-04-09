@@ -4,3 +4,4 @@
 dependencies-Don-t-build-with-flashrom-and-umock-support.patch
 Fix-compatibility-with-older-gnutls-versions.patch
 Add-atari-plugin-for-vcs-controllers.patch
+Skip-pkcs7-verify-data-test-on-older-gnutls.patch
