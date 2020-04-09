@@ -1,0 +1,727 @@
+From: Sjoerd Simons <sjoerd@collabora.com>
+Date: Tue, 7 Apr 2020 21:21:25 +0200
+Subject: Add atari plugin for vcs controllers
+
+Signed-off-by: Sjoerd Simons <sjoerd@collabora.com>
+---
+ plugins/atari/atari.quirk         |  20 ++
+ plugins/atari/fu-atari-device.c   | 427 ++++++++++++++++++++++++++++++++++++++
+ plugins/atari/fu-atari-device.h   |  12 ++
+ plugins/atari/fu-atari-firmware.c | 128 ++++++++++++
+ plugins/atari/fu-atari-firmware.h |  16 ++
+ plugins/atari/fu-plugin-atari.c   |  21 ++
+ plugins/atari/meson.build         |  29 +++
+ plugins/meson.build               |   1 +
+ 8 files changed, 654 insertions(+)
+ create mode 100644 plugins/atari/atari.quirk
+ create mode 100644 plugins/atari/fu-atari-device.c
+ create mode 100644 plugins/atari/fu-atari-device.h
+ create mode 100644 plugins/atari/fu-atari-firmware.c
+ create mode 100644 plugins/atari/fu-atari-firmware.h
+ create mode 100644 plugins/atari/fu-plugin-atari.c
+ create mode 100644 plugins/atari/meson.build
+
+diff --git a/plugins/atari/atari.quirk b/plugins/atari/atari.quirk
+new file mode 100644
+index 0000000..1f1ff45
+--- /dev/null
++++ b/plugins/atari/atari.quirk
+@@ -0,0 +1,20 @@
++# classic bootloader
++[DeviceInstanceId=USB\VID_3250&PID_0001]
++Plugin = atari
++Flags = is-bootloader
++
++# modern bootloader
++[DeviceInstanceId=USB\VID_3250&PID_0002]
++Plugin = atari
++Flags = is-bootloader
++
++# Classic controller
++[DeviceInstanceId=USB\VID_3250&PID_1001]
++Plugin = atari
++Flags = none
++
++# Modern controller
++[DeviceInstanceId=USB\VID_3250&PID_1002]
++Plugin = atari
++Flags = none
++InstallDuration = 120
+diff --git a/plugins/atari/fu-atari-device.c b/plugins/atari/fu-atari-device.c
+new file mode 100644
+index 0000000..55cbe14
+--- /dev/null
++++ b/plugins/atari/fu-atari-device.c
+@@ -0,0 +1,427 @@
++/*
++ * Copyright (C) 2020 Sjoerd Simons <sjoerd@collabora.com>
++ *
++ * SPDX-License-Identifier: LGPL-2.1+
++ */
++
++#include "config.h"
++
++#include <string.h>
++
++#include "fu-chunk.h"
++
++#include "fu-atari-device.h"
++#include "fu-atari-firmware.h"
++
++#define ATARI_VID 0x3250
++
++#define ATARI_CLASSIC_PID 0x1001
++#define ATARI_MODERN_PID 0x1002
++
++#define ATARI_CLASSIC_BOOTLOADER_PID 0x1
++#define ATARI_MODERN_BOOTLOADER_PID 0x2
++
++#define ATARI_EP_IN  0x82
++#define ATARI_EP_OUT 0x1
++#define ATARI_USB_TIMEOUT 1000
++#define ATARI_CMD_SIZE 10
++
++
++struct _FuAtariDevice {
++	FuUsbDevice		 parent_instance;
++};
++
++G_DEFINE_TYPE (FuAtariDevice, fu_atari_device, FU_TYPE_USB_DEVICE)
++
++static gboolean
++fu_atari_device_send (FuAtariDevice *device, GBytes *data, GError **error)
++{
++	GUsbDevice *usb = fu_usb_device_get_dev (FU_USB_DEVICE (device));
++	gsize transferred = -1;
++
++	if (!g_usb_device_bulk_transfer (usb,
++			ATARI_EP_OUT,
++			g_bytes_get_data (data, NULL),
++			g_bytes_get_size (data),
++			&transferred,
++			ATARI_USB_TIMEOUT,
++			NULL,
++			error))
++		return  FALSE;
++
++	if (transferred != g_bytes_get_size (data)) {
++		g_set_error_literal (error,
++				     G_IO_ERROR,
++				     G_IO_ERROR_NO_SPACE,
++				     "Couldn't send all data");
++		return FALSE;
++	}
++	
++	return TRUE;
++}
++
++static gboolean
++fu_atari_device_send_cmd (FuAtariDevice *self, const guint8 *data, GError **error)
++{
++	g_autoptr(GBytes) cmd = g_bytes_new_static (data, 10);
++
++	return fu_atari_device_send (self, cmd, error);
++}
++
++static GBytes *
++fu_atari_device_receive (FuAtariDevice *device, gsize size, GError **error) {
++	GUsbDevice *usb = fu_usb_device_get_dev (FU_USB_DEVICE (device));
++	g_autofree guint8 *data = g_malloc0 (size);
++	gsize transferred;
++
++	if (!g_usb_device_bulk_transfer (usb,
++			ATARI_EP_IN,
++			data,
++			size,
++			&transferred,
++			ATARI_USB_TIMEOUT,
++			NULL,
++			error))
++		return  NULL;
++
++	return g_bytes_new_take (g_steal_pointer (&data), transferred);
++}
++
++static gboolean
++fu_atari_device_get_status (FuAtariDevice *self, GError **error)
++{
++	g_autoptr(GBytes) status  = NULL;
++	guint8 *s;
++	gsize received;
++
++	status = fu_atari_device_receive (self, 1, error);
++	if (status == NULL)
++		return FALSE;
++	
++	s = g_bytes_get_data (status, &received);
++	if (received != 1 || s[0] != 0x0) {
++		g_set_error_literal (error,
++				     G_IO_ERROR,
++				     G_IO_ERROR_FAILED,
++				     "Failure status received");
++                return FALSE;
++	}
++
++	return TRUE;
++}
++
++static gboolean
++fu_atari_device_erase (FuAtariDevice *self, GError **error) {
++	guint8 cmd[] = { 0x25, 0x00, 0x00, 0x00, 0x00,
++			 0x00, 0x00, 0x00, 0xFF, 0x00};
++	
++	if (!fu_atari_device_send_cmd (self, cmd, error))
++		return FALSE;
++
++	return fu_atari_device_get_status (self, error);
++}
++
++static gboolean
++fu_atari_device_write_flash (FuAtariDevice *self,
++			     gsize offset,
++			     GBytes *data,
++			     GError **error) {
++	guint8 cmd[] = { 0x28, 0x00, 0x00, 0x00, 0x00,
++			 (offset >> 8) & 0xff,
++			 offset & 0xff,
++			 0x00, 0x40, 0x00};
++	
++	g_assert (g_bytes_get_size (data) == 64);
++
++	if (!fu_atari_device_send_cmd (self, cmd, error))
++		return FALSE;
++
++	if (!fu_atari_device_send (self, data, error))
++		return FALSE;
++
++	if (!fu_atari_device_get_status (self, error))
++		return FALSE;
++
++	return TRUE;
++}
++
++static GBytes *
++fu_atari_device_read_flash (FuAtariDevice *self,
++			    gsize offset,
++			    GError **error) {
++	guint8 cmd[] = { 0x2A, 0x00, 0x00, 0x00, 0x00,
++			 (offset >> 8) & 0xff, offset & 0xff,
++			 0x00, 0x40, 0x00};
++	g_autoptr(GBytes) recv = NULL;
++
++	if (!fu_atari_device_send_cmd (self, cmd, error))
++		return FALSE;
++	
++	recv = fu_atari_device_receive (self, 64, error);
++	if (recv == NULL)
++		return NULL;
++	
++	if (!fu_atari_device_get_status (self, error))
++		return NULL;
++	
++	return g_steal_pointer (&recv);
++}
++
++static gboolean
++fu_atari_device_verify (FuAtariDevice *self, GError **error) {
++	guint8 cmd[] = { 0x2F, 0x00, 0x00, 0x00, 0x00,
++			 0x00, 0x00, 0x00, 0x40, 0x00};
++
++	return fu_atari_device_send_cmd (self, cmd, error);
++}
++
++
++static gboolean
++fu_atari_device_attach (FuDevice *device, GError **error)
++{
++	guint8 cmd[] = { 0x20, 0x00, 0x00, 0x00, 0x00,
++			  0x00, 0x00, 0x00, 0x40, 0x00};
++
++	if (!fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER))
++		return TRUE;
++
++	if (!fu_atari_device_send_cmd (FU_ATARI_DEVICE (device), cmd, error))
++		return  FALSE;
++
++	fu_device_set_status (device, FWUPD_STATUS_DEVICE_RESTART);
++	fu_device_add_flag (device, FWUPD_DEVICE_FLAG_WAIT_FOR_REPLUG);
++
++	return TRUE;
++}
++
++static gboolean
++fu_atari_device_detach (FuDevice *device, GError **error)
++{
++	GUsbDevice *usb = fu_usb_device_get_dev (FU_USB_DEVICE (device));
++	guint8 data[20];
++
++	if (fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER))
++		return TRUE;
++
++	if (!g_usb_device_control_transfer (usb,
++			G_USB_DEVICE_DIRECTION_DEVICE_TO_HOST,
++			G_USB_DEVICE_REQUEST_TYPE_STANDARD,
++			G_USB_DEVICE_RECIPIENT_DEVICE,
++			0x6, /* LIBUSB_REQUEST_GET_DESCRIPTOR */
++			0x3 /* LIBUSB_DT_STRING*/ << 8 | 0xff,
++			0x5079,
++			data,
++			sizeof(data),
++			NULL,
++			1000,
++			NULL,
++			error))
++		return FALSE;
++
++	fu_device_set_status (device, FWUPD_STATUS_DEVICE_RESTART);
++	fu_device_add_flag (device, FWUPD_DEVICE_FLAG_WAIT_FOR_REPLUG);
++
++	return TRUE;
++}
++
++static gboolean
++fu_atari_device_write_firmware (FuDevice *device,
++				FuFirmware *firmware,
++				FwupdInstallFlags flags,
++				GError **error)
++{
++	FuAtariDevice *self = FU_ATARI_DEVICE (device);
++	g_autoptr(GBytes) payload = NULL;
++	g_autoptr(GPtrArray) chunks = NULL;
++
++	if (!fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER)) {
++			g_set_error (error,
++			             FWUPD_ERROR,
++			             FWUPD_ERROR_INTERNAL,
++			             "Did not switch to bootlaoder mode");
++		return FALSE;
++	}
++
++	payload = fu_firmware_get_image_by_id_bytes (firmware,
++						     FU_FIRMWARE_IMAGE_ID_PAYLOAD,
++						     error);
++	if (payload == NULL)
++		return FALSE;
++	
++	fu_device_set_status (device, FWUPD_STATUS_DEVICE_WRITE);
++
++	if (!fu_atari_device_erase (self, error))
++		return FALSE;
++
++	chunks = fu_chunk_array_new_from_bytes (payload, 0, 0, 64);
++	fu_device_set_progress_full (device, 0, chunks->len);
++
++	for (guint i = 0; i < chunks->len; i++) {
++		FuChunk *chunk = g_ptr_array_index (chunks, i);
++		g_autoptr (GBytes) w = g_bytes_new_static (chunk->data,
++							   chunk->data_sz);
++		g_autoptr (GBytes) r = NULL;
++
++		if (!fu_atari_device_write_flash (self,
++						  chunk->address,
++						  w,
++						  error))
++			return FALSE;
++
++		r = fu_atari_device_read_flash (self,
++						chunk->address,
++						error);
++		if (r == NULL)
++			return FALSE;
++		
++		if (g_getenv ("FWUPD_ATARI_VERBOSE") != NULL || TRUE) {
++			fu_common_dump_bytes (G_LOG_DOMAIN, "<-DEVICE", r);
++		}
++
++		if (!fu_common_bytes_compare (r, w, error)) {
++			g_prefix_error (error, "Failed to verify write @x%04x: ",
++				(guint) chunk->address);
++			return FALSE;
++		}
++
++		fu_device_set_progress_full (device, chunk->idx, chunks->len);
++	}
++
++	if (!fu_atari_device_verify (self, error))
++		return FALSE;
++
++	return TRUE;
++}
++
++static FuFirmware *
++fu_atari_device_prepare_firmware (FuDevice *device,
++				  GBytes *fw,
++				  FwupdInstallFlags flags,
++				  GError **error)
++{
++	g_autoptr(FuFirmware) firmware = fu_atari_firmware_new();
++	guint16 device_vid, device_pid;
++	guint16 firmware_pid, firmware_vid;
++
++	if (!fu_firmware_parse (firmware, fw, flags, error))
++		return NULL;
++	
++	device_vid = fu_usb_device_get_vid (FU_USB_DEVICE (device));
++	/* Map bootloader PID to device mode PID */
++	switch (fu_usb_device_get_pid (FU_USB_DEVICE (device))) {
++		case ATARI_CLASSIC_BOOTLOADER_PID:
++			device_pid = ATARI_CLASSIC_PID;
++			break;
++		case ATARI_MODERN_BOOTLOADER_PID:
++			device_pid = ATARI_MODERN_PID;
++			break;
++		default:
++			g_set_error (error,
++			             G_IO_ERROR,
++			             G_IO_ERROR_NOT_SUPPORTED,
++			             "Unsupported bootloader");
++			return FALSE;
++	}
++
++	firmware_vid = fu_atari_firmware_get_vid (FU_ATARI_FIRMWARE (firmware));
++	firmware_pid = fu_atari_firmware_get_pid (FU_ATARI_FIRMWARE (firmware));
++
++	if (device_vid != firmware_vid || device_pid != firmware_pid) {
++		g_set_error (error,
++			     G_IO_ERROR,
++			     G_IO_ERROR_NOT_SUPPORTED,
++			     "Firmware not compatible, "
++			     "Device: %04X:%04X, firmare: %04X: %04X",
++			     device_vid,
++			     device_pid,
++			     firmware_vid,
++			     firmware_pid);
++		return NULL;
++	}
++	
++	return g_steal_pointer (&firmware);
++}
++
++static gboolean
++fu_atari_device_open (FuUsbDevice *device, GError **error)
++{
++	GUsbDevice *usb = fu_usb_device_get_dev (FU_USB_DEVICE (device));
++
++	if (!g_usb_device_claim_interface (usb, 0,
++					   G_USB_DEVICE_CLAIM_INTERFACE_BIND_KERNEL_DRIVER,
++					   error)) {
++		return FALSE;
++	}
++
++	return TRUE;
++}
++
++static gboolean
++fu_atari_device_probe (FuUsbDevice *device, GError **error)
++{
++	FuAtariDevice *self = FU_ATARI_DEVICE (device);
++	const gchar *summary = "Atari game controller";
++	guint16 counterpart = 0xffff;
++
++	/* allowed, but requires manual bootloader step */
++	fu_device_add_flag (FU_DEVICE (device), FWUPD_DEVICE_FLAG_UPDATABLE);
++	fu_device_set_remove_delay (FU_DEVICE (device), FU_DEVICE_REMOVE_DELAY_USER_REPLUG);
++
++	/* set name and vendor */
++
++	fu_device_set_vendor (FU_DEVICE (device), "Atari");
++
++	switch (fu_usb_device_get_pid (device)) {
++		case ATARI_MODERN_PID:
++			counterpart = ATARI_MODERN_BOOTLOADER_PID;
++			/* fallthrough */
++		case ATARI_MODERN_BOOTLOADER_PID:
++			summary = "Atari Modern style controller";
++			break;
++		case ATARI_CLASSIC_PID:
++			counterpart = ATARI_CLASSIC_BOOTLOADER_PID;
++			/* fallthrough */
++		case ATARI_CLASSIC_BOOTLOADER_PID:
++			summary = "Atari Classic style controller";
++			break;
++		default:
++			break;
++  }
++
++	fu_device_set_summary (FU_DEVICE (device), summary);
++	fu_device_add_icon (FU_DEVICE (device), "input-gaming");
++
++	/* only the bootloader can do the update */
++	if (!fu_device_has_flag (FU_DEVICE (self),
++			FWUPD_DEVICE_FLAG_IS_BOOTLOADER)) {
++		g_autofree gchar *counterpart_str =
++			g_strdup_printf ("USB\\VID_%04X&PID_%04X",
++				(guint)ATARI_VID, counterpart);
++
++		fu_device_add_counterpart_guid (FU_DEVICE (device), counterpart_str);
++	}
++
++	return TRUE;
++}
++
++static void
++fu_atari_device_init (FuAtariDevice *self)
++{
++	fu_device_set_protocol (FU_DEVICE (self), "com.atarivcs.controller");
++}
++
++static void
++fu_atari_device_class_init (FuAtariDeviceClass *klass)
++{
++	FuDeviceClass *klass_device = FU_DEVICE_CLASS (klass);
++	FuUsbDeviceClass *klass_usb_device = FU_USB_DEVICE_CLASS (klass);
++
++	klass_device->detach = fu_atari_device_detach;
++	klass_device->attach = fu_atari_device_attach;
++
++	klass_device->write_firmware = fu_atari_device_write_firmware;
++	klass_device->prepare_firmware = fu_atari_device_prepare_firmware;
++
++	klass_usb_device->open = fu_atari_device_open;
++	klass_usb_device->probe = fu_atari_device_probe;
++}
+diff --git a/plugins/atari/fu-atari-device.h b/plugins/atari/fu-atari-device.h
+new file mode 100644
+index 0000000..e9c5f54
+--- /dev/null
++++ b/plugins/atari/fu-atari-device.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright (C) 2020 Sjoerd Simons <sjoerd@collabora.com>
++ *
++ * SPDX-License-Identifier: LGPL-2.1+
++ */
++
++#pragma once
++
++#include "fu-plugin.h"
++
++#define FU_TYPE_ATARI_DEVICE (fu_atari_device_get_type ())
++G_DECLARE_FINAL_TYPE (FuAtariDevice, fu_atari_device, FU, ATARI_DEVICE, FuUsbDevice)
+diff --git a/plugins/atari/fu-atari-firmware.c b/plugins/atari/fu-atari-firmware.c
+new file mode 100644
+index 0000000..a7e918c
+--- /dev/null
++++ b/plugins/atari/fu-atari-firmware.c
+@@ -0,0 +1,128 @@
++/*
++ * Copyright (C) 2020 Sjoerd Simons <sjoerd@collabora.com>
++ *
++ * SPDX-License-Identifier: LGPL-2.1+
++ */
++
++#include "config.h"
++
++#include "fu-atari-firmware.h"
++
++struct _FuAtariFirmware {
++	FuFirmware	parent_instance;
++	guint16 vid;
++	guint16 pid;
++};
++
++G_DEFINE_TYPE (FuAtariFirmware, fu_atari_firmware, FU_TYPE_FIRMWARE)
++
++typedef struct __attribute__((packed)) {
++	guint8 version[4];
++	guint16 vid_be;
++	guint16 pid_be;
++	guint8 check[8];
++} FuAtariFirmwareSuffix;
++
++static gboolean
++fu_atari_firmware_parse (FuFirmware *firmware,
++			 GBytes *fw,
++			 guint64 addr_start,
++			 guint64 addr_end,
++			 FwupdInstallFlags flags,
++			 GError **error)
++{
++	FuAtariFirmware *self = FU_ATARI_FIRMWARE (firmware);
++	g_autoptr(FuFirmwareImage) payload = NULL;
++	g_autofree gchar *version = NULL;
++	const guint8 *data;
++	gsize size;
++	const FuAtariFirmwareSuffix *suffix;
++	/* check bytes at the end */
++	guint8 check[] = { 0x0, 0x0, 0x0, 0x0, 0x55, 0xaa, 0x33, 0xcc };
++	int i;
++
++	data = g_bytes_get_data (fw,  &size);
++	if (size < sizeof(FuAtariFirmwareSuffix)) {
++		g_set_error_literal (error,
++				     G_IO_ERROR,
++				     G_IO_ERROR_INVALID_DATA,
++				     "Firmware too small");
++		return FALSE;
++	}
++
++	suffix = (FuAtariFirmwareSuffix *)(data + size - sizeof(FuAtariFirmwareSuffix));
++	for (i = 0 ; i < 8; i++) {
++		if (suffix->check[i] != check[i]) {
++			g_set_error_literal (error,
++					     G_IO_ERROR,
++					     G_IO_ERROR_INVALID_DATA,
++					     "Check bytes don't match");
++			return FALSE;
++		}
++
++	}
++
++	if (suffix->version[0] != 'V' && !g_ascii_isdigit(suffix->version[0])) {
++		g_set_error_literal (error,
++				     G_IO_ERROR,
++				     G_IO_ERROR_INVALID_DATA,
++				     "Unexpected version string");
++		return FALSE;
++	}
++
++	if (g_ascii_isdigit (suffix->version[0])) {
++		version = g_strdup_printf("%c%c.%c%c",
++					  suffix->version[0],
++					  suffix->version[1],
++					  suffix->version[2],
++					  suffix->version[3]);
++	} else {
++		version = g_strdup_printf("%c.%c%c",
++					  suffix->version[1],
++					  suffix->version[2],
++					  suffix->version[3]);
++	}
++
++
++	self->vid = GUINT16_FROM_BE(suffix->vid_be);
++	self->pid = GUINT16_FROM_BE(suffix->pid_be);
++
++	payload = fu_firmware_image_new (fw);
++	fu_firmware_image_set_id (payload, FU_FIRMWARE_IMAGE_ID_PAYLOAD);
++	fu_firmware_add_image (firmware, payload);
++
++	fu_firmware_set_version (firmware, version);
++	fu_firmware_image_set_version (payload, version);
++
++	return TRUE;
++}
++
++guint16
++fu_atari_firmware_get_vid (FuAtariFirmware *self)
++{
++	return self->vid;
++}
++
++guint16
++fu_atari_firmware_get_pid (FuAtariFirmware *self) {
++	return self->pid;
++}
++
++static void
++fu_atari_firmware_init (FuAtariFirmware *self)
++{
++}
++
++static void
++fu_atari_firmware_class_init (FuAtariFirmwareClass *klass)
++{
++	FuFirmwareClass *klass_firmware = FU_FIRMWARE_CLASS (klass);
++
++	klass_firmware->parse = fu_atari_firmware_parse;
++}
++
++FuFirmware *
++fu_atari_firmware_new (void)
++{
++	return FU_FIRMWARE (g_object_new (FU_TYPE_ATARI_FIRMWARE, NULL));
++}
+diff --git a/plugins/atari/fu-atari-firmware.h b/plugins/atari/fu-atari-firmware.h
+new file mode 100644
+index 0000000..db6479a
+--- /dev/null
++++ b/plugins/atari/fu-atari-firmware.h
+@@ -0,0 +1,16 @@
++/*
++ * Copyright (C) 2020 Sjoerd Simons <sjoerd@collabora.com>
++ *
++ * SPDX-License-Identifier: LGPL-2.1+
++ */
++
++#pragma once
++
++#include "fu-plugin.h"
++
++#define FU_TYPE_ATARI_FIRMWARE (fu_atari_firmware_get_type ())
++G_DECLARE_FINAL_TYPE (FuAtariFirmware, fu_atari_firmware, FU, ATARI_FIRMWARE, FuFirmware)
++
++FuFirmware * fu_atari_firmware_new (void);
++guint16 fu_atari_firmware_get_vid (FuAtariFirmware *self);
++guint16 fu_atari_firmware_get_pid (FuAtariFirmware *self);
+diff --git a/plugins/atari/fu-plugin-atari.c b/plugins/atari/fu-plugin-atari.c
+new file mode 100644
+index 0000000..d2bd259
+--- /dev/null
++++ b/plugins/atari/fu-plugin-atari.c
+@@ -0,0 +1,21 @@
++/*
++ * Copyright (C) 2020 Sjoerd Simons <sjoerd@collabora.com>
++ *
++ * SPDX-License-Identifier: LGPL-2.1+
++ */
++
++#include "config.h"
++
++#include "fu-atari-device.h"
++
++#include "fu-plugin-vfuncs.h"
++#include "fu-hash.h"
++#include "fu-atari-firmware.h"
++
++void
++fu_plugin_init (FuPlugin *plugin)
++{
++	fu_plugin_set_build_hash (plugin, FU_BUILD_HASH);
++	fu_plugin_set_device_gtype (plugin, FU_TYPE_ATARI_DEVICE);
++	fu_plugin_add_firmware_gtype (plugin, "atari", FU_TYPE_ATARI_FIRMWARE);
++}
+diff --git a/plugins/atari/meson.build b/plugins/atari/meson.build
+new file mode 100644
+index 0000000..c6eca8d
+--- /dev/null
++++ b/plugins/atari/meson.build
+@@ -0,0 +1,29 @@
++cargs = ['-DG_LOG_DOMAIN="FuPluginAtari"']
++
++install_data(['atari.quirk'],
++  install_dir: join_paths(datadir, 'fwupd', 'quirks.d')
++)
++
++shared_module('fu_plugin_atari',
++  fu_hash,
++  sources : [
++    'fu-plugin-atari.c',
++    'fu-atari-device.c',
++    'fu-atari-firmware.c',
++  ],
++  include_directories : [
++    root_incdir,
++    fwupd_incdir,
++    fwupdplugin_incdir,
++  ],
++  install : true,
++  install_dir: plugin_dir,
++  link_with : [
++    fwupd,
++    fwupdplugin,
++  ],
++  c_args : cargs,
++  dependencies : [
++    plugin_deps,
++  ],
++)
+diff --git a/plugins/meson.build b/plugins/meson.build
+index 0089526..278c082 100644
+--- a/plugins/meson.build
++++ b/plugins/meson.build
+@@ -1,3 +1,4 @@
++subdir('atari')
+ subdir('dfu')
+ subdir('colorhug')
+ subdir('ebitdo')
