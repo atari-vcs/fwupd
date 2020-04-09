@@ -1,7 +1,8 @@
 0001-fix-fwupd.shutdown.in-according-to-the-movement-of-f.patch
 0001-ci-build-Debian-using-libflashrom.patch
 0001-uefi-Don-t-use-shim-for-non-secure-boot-configuratio.patch
-dependencies-Don-t-build-with-flashrom-and-umock-support.patch
-Fix-compatibility-with-older-gnutls-versions.patch
-Add-atari-plugin-for-vcs-controllers.patch
-Skip-pkcs7-verify-data-test-on-older-gnutls.patch
+atari/dependencies-Don-t-build-with-flashrom-and-umock-support.patch
+atari/Fix-compatibility-with-older-gnutls-versions.patch
+atari/Add-atari-plugin-for-vcs-controllers.patch
+atari/Skip-pkcs7-verify-data-test-on-older-gnutls.patch
+atari/Only-claim-usb-interface-in-bootloader-mode.patch

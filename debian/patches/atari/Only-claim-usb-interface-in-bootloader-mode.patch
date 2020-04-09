@@ -1,0 +1,28 @@
+From: Sjoerd Simons <sjoerd@collabora.com>
+Date: Thu, 9 Apr 2020 14:54:29 +0200
+Subject: Only claim usb interface in bootloader mode
+
+When claiming the usb interface in normal mode the kernel driver will be
+unbound every time a controller gets plugged in which is bad and it's
+also not needed as only when writing the firwmare is the interface
+actually used.
+
+Signed-off-by: Sjoerd Simons <sjoerd@collabora.com>
+---
+ plugins/atari/fu-atari-device.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/plugins/atari/fu-atari-device.c b/plugins/atari/fu-atari-device.c
+index 55cbe14..6496cb6 100644
+--- a/plugins/atari/fu-atari-device.c
++++ b/plugins/atari/fu-atari-device.c
+@@ -347,6 +347,9 @@ fu_atari_device_open (FuUsbDevice *device, GError **error)
+ {
+ 	GUsbDevice *usb = fu_usb_device_get_dev (FU_USB_DEVICE (device));
+ 
++	if (!fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER))
++		return TRUE;
++
+ 	if (!g_usb_device_claim_interface (usb, 0,
+ 					   G_USB_DEVICE_CLAIM_INTERFACE_BIND_KERNEL_DRIVER,
+ 					   error)) {
