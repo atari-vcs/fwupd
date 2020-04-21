@@ -1,0 +1,283 @@
+From: Sjoerd Simons <sjoerd@collabora.com>
+Date: Tue, 14 Apr 2020 21:08:18 +0200
+Subject: Expose device physical id to clients
+
+To allow fwupd clients to better communicate which device is going to be
+updated to the user it may be required to know which physical device a
+fwupd device refers to. To that end expose the physical id that fwupd
+already keeps.
+
+Signed-off-by: Sjoerd Simons <sjoerd@collabora.com>
+---
+ libfwupd/fwupd-device.c        | 54 ++++++++++++++++++++++++++++++++++++++++++
+ libfwupd/fwupd-device.h        |  3 +++
+ libfwupd/fwupd-enums-private.h |  1 +
+ libfwupd/fwupd.map             |  7 ++++++
+ libfwupdplugin/fu-device.c     | 31 ++++++++++--------------
+ src/fu-util-common.c           |  6 +++++
+ 6 files changed, 84 insertions(+), 18 deletions(-)
+
+diff --git a/libfwupd/fwupd-device.c b/libfwupd/fwupd-device.c
+index 1a7a15e..95b1422 100644
+--- a/libfwupd/fwupd-device.c
++++ b/libfwupd/fwupd-device.c
+@@ -30,6 +30,7 @@ static void fwupd_device_finalize	 (GObject *object);
+ typedef struct {
+ 	gchar				*id;
+ 	gchar				*parent_id;
++	gchar				*physical_id;
+ 	guint64				 created;
+ 	guint64				 modified;
+ 	guint64				 flags;
+@@ -275,6 +276,53 @@ fwupd_device_set_parent_id (FwupdDevice *device, const gchar *parent_id)
+ 	priv->parent_id = g_strdup (parent_id);
+ }
+ 
++/**
++ * fwupd_device_set_physical_id:
++ * @device: A #FwupdDevice
++ * @physical_id: a string that identifies the physical device connection
++ *
++ * Sets the physical ID on the device which represents the electrical connection
++ * of the device to the system. Multiple #FuDevices can share a physical ID.
++ *
++ * The physical ID is used to remove logical devices when a physical device has
++ * been removed from the system.
++ *
++ * A sysfs or devpath is not a physical ID, but could be something like
++ * `PCI_SLOT_NAME=0000:3e:00.0`.
++ *
++ * Since: 1.3.X
++ **/
++void
++fwupd_device_set_physical_id (FwupdDevice *device, const gchar *physical_id)
++{
++	FwupdDevicePrivate *priv = GET_PRIVATE (device);
++	g_return_if_fail (FWUPD_IS_DEVICE (device));
++	g_return_if_fail (physical_id != NULL);
++	g_free (priv->physical_id);
++	priv->physical_id = g_strdup (physical_id);
++}
++
++/**
++ * fwupd_device_get_physical_id:
++ * @device: A #FwupdDevice
++ *
++ * Gets the physical ID set for the device, which represents the electrical
++ * connection used to compare devices.
++ *
++ * Multiple #FwupdDevices can share a single physical ID.
++ *
++ * Returns: a string value, or %NULL if never set.
++ *
++ * Since: 1.3.X
++ **/
++const gchar *
++fwupd_device_get_physical_id (FwupdDevice *device)
++{
++	FwupdDevicePrivate *priv = GET_PRIVATE (device);
++	g_return_val_if_fail (FWUPD_IS_DEVICE (device), NULL);
++	return priv->physical_id;
++}
++
+ /**
+  * fwupd_device_get_parent:
+  * @device: A #FwupdDevice
+@@ -1197,6 +1245,11 @@ fwupd_device_to_variant_full (FwupdDevice *device, FwupdDeviceFlags flags)
+ 				       FWUPD_RESULT_KEY_GUID,
+ 				       g_variant_new_strv (tmp, priv->guids->len));
+ 	}
++	if (priv->physical_id != NULL) {
++		g_variant_builder_add (&builder, "{sv}",
++				       FWUPD_RESULT_KEY_PHYSICAL_ID,
++				       g_variant_new_string (priv->physical_id));
++	}
+ 	if (priv->icons->len > 0) {
+ 		const gchar * const *tmp = (const gchar * const *) priv->icons->pdata;
+ 		g_variant_builder_add (&builder, "{sv}",
+@@ -2114,6 +2167,7 @@ fwupd_device_finalize (GObject *object)
+ 	g_free (priv->description);
+ 	g_free (priv->id);
+ 	g_free (priv->parent_id);
++	g_free (priv->physical_id);
+ 	g_free (priv->name);
+ 	g_free (priv->serial);
+ 	g_free (priv->summary);
+diff --git a/libfwupd/fwupd-device.h b/libfwupd/fwupd-device.h
+index 5a1f74d..8969aa2 100644
+--- a/libfwupd/fwupd-device.h
++++ b/libfwupd/fwupd-device.h
+@@ -38,6 +38,9 @@ void		 fwupd_device_set_id			(FwupdDevice	*device,
+ const gchar	*fwupd_device_get_parent_id		(FwupdDevice	*device);
+ void		 fwupd_device_set_parent_id		(FwupdDevice	*device,
+ 							 const gchar	*parent_id);
++const gchar	*fwupd_device_get_physical_id		(FwupdDevice	*device);
++void		 fwupd_device_set_physical_id		(FwupdDevice	*device,
++							 const gchar	*physical_id);
+ FwupdDevice	*fwupd_device_get_parent		(FwupdDevice	*device);
+ void		 fwupd_device_set_parent		(FwupdDevice	*device,
+ 							 FwupdDevice	*parent);
+diff --git a/libfwupd/fwupd-enums-private.h b/libfwupd/fwupd-enums-private.h
+index 4118bfb..84484a5 100644
+--- a/libfwupd/fwupd-enums-private.h
++++ b/libfwupd/fwupd-enums-private.h
+@@ -25,6 +25,7 @@ G_BEGIN_DECLS
+ #define FWUPD_RESULT_KEY_INSTALL_DURATION	"InstallDuration"	/* u */
+ #define FWUPD_RESULT_KEY_GUID			"Guid"		/* as */
+ #define FWUPD_RESULT_KEY_INSTANCE_IDS		"InstanceIds"	/* as */
++#define FWUPD_RESULT_KEY_PHYSICAL_ID		"PhysicalId"	/* s */
+ #define FWUPD_RESULT_KEY_HOMEPAGE		"Homepage"	/* s */
+ #define FWUPD_RESULT_KEY_DETAILS_URL		"DetailsUrl"	/* s */
+ #define FWUPD_RESULT_KEY_SOURCE_URL		"SourceUrl"	/* s */
+diff --git a/libfwupd/fwupd.map b/libfwupd/fwupd.map
+index efad9ce..34ffdaf 100644
+--- a/libfwupd/fwupd.map
++++ b/libfwupd/fwupd.map
+@@ -421,3 +421,10 @@ LIBFWUPD_1.3.7 {
+     fwupd_device_get_children;
+   local: *;
+ } LIBFWUPD_1.3.6;
++
++LIBFWUPD_1.3.X {
++  global:
++    fwupd_device_get_physical_id;
++    fwupd_device_set_physical_id;
++  local: *;
++} LIBFWUPD_1.3.7;
+diff --git a/libfwupdplugin/fu-device.c b/libfwupdplugin/fu-device.c
+index f3217bd..877ba9d 100644
+--- a/libfwupdplugin/fu-device.c
++++ b/libfwupdplugin/fu-device.c
+@@ -34,7 +34,6 @@ static void fu_device_finalize			 (GObject *object);
+ typedef struct {
+ 	gchar				*alternate_id;
+ 	gchar				*equivalent_id;
+-	gchar				*physical_id;
+ 	gchar				*logical_id;
+ 	FuDevice			*alternate;
+ 	FuDevice			*parent;	/* noref */
+@@ -87,7 +86,8 @@ fu_device_get_property (GObject *object, guint prop_id,
+ 		g_value_set_uint (value, priv->progress);
+ 		break;
+ 	case PROP_PHYSICAL_ID:
+-		g_value_set_string (value, priv->physical_id);
++		g_value_set_string (value,
++				    fu_device_get_physical_id (self));
+ 		break;
+ 	case PROP_LOGICAL_ID:
+ 		g_value_set_string (value, priv->logical_id);
+@@ -1410,8 +1410,8 @@ fu_device_set_version (FuDevice *self, const gchar *version, FwupdVersionFormat
+ gboolean
+ fu_device_ensure_id (FuDevice *self, GError **error)
+ {
+-	FuDevicePrivate *priv = GET_PRIVATE (self);
+ 	g_autofree gchar *device_id = NULL;
++	gchar *physical_id = fu_device_get_physical_id (self);
+ 
+ 	g_return_val_if_fail (FU_IS_DEVICE (self), FALSE);
+ 	g_return_val_if_fail (error == NULL || *error == NULL, FALSE);
+@@ -1421,7 +1421,7 @@ fu_device_ensure_id (FuDevice *self, GError **error)
+ 		return TRUE;
+ 
+ 	/* nothing we can do! */
+-	if (priv->physical_id == NULL) {
++	if (physical_id == NULL) {
+ 		g_autofree gchar *tmp = fu_device_to_string (self);
+ 		g_set_error (error,
+ 			     G_IO_ERROR,
+@@ -1432,7 +1432,7 @@ fu_device_ensure_id (FuDevice *self, GError **error)
+ 
+ 	/* logical may be NULL */
+ 	device_id = g_strjoin (":",
+-			       fu_device_get_physical_id (self),
++			       physical_id,
+ 			       fu_device_get_logical_id (self),
+ 			       NULL);
+ 	fu_device_set_id (self, device_id);
+@@ -1529,11 +1529,7 @@ fu_device_set_protocol (FuDevice *self, const gchar *protocol)
+ void
+ fu_device_set_physical_id (FuDevice *self, const gchar *physical_id)
+ {
+-	FuDevicePrivate *priv = GET_PRIVATE (self);
+-	g_return_if_fail (FU_IS_DEVICE (self));
+-	g_return_if_fail (physical_id != NULL);
+-	g_free (priv->physical_id);
+-	priv->physical_id = g_strdup (physical_id);
++	fwupd_device_set_physical_id (FWUPD_DEVICE (self), physical_id);
+ }
+ 
+ /**
+@@ -1552,9 +1548,7 @@ fu_device_set_physical_id (FuDevice *self, const gchar *physical_id)
+ const gchar *
+ fu_device_get_physical_id (FuDevice *self)
+ {
+-	FuDevicePrivate *priv = GET_PRIVATE (self);
+-	g_return_val_if_fail (FU_IS_DEVICE (self), NULL);
+-	return priv->physical_id;
++	return fwupd_device_get_physical_id (FWUPD_DEVICE (self));
+ }
+ 
+ /**
+@@ -1823,6 +1817,7 @@ fu_device_add_string (FuDevice *self, guint idt, GString *str)
+ 	g_autofree gchar *tmp = NULL;
+ 	g_autoptr(GList) keys = NULL;
+ 	g_autoptr(GRWLockReaderLocker) locker = g_rw_lock_reader_locker_new (&priv->metadata_mutex);
++	const gchar *physical_id = fu_device_get_physical_id (self);
+ 
+ 	g_return_if_fail (locker != NULL);
+ 
+@@ -1836,8 +1831,8 @@ fu_device_add_string (FuDevice *self, guint idt, GString *str)
+ 		fu_common_string_append_kv (str, idt + 1, "AlternateId", priv->alternate_id);
+ 	if (priv->equivalent_id != NULL)
+ 		fu_common_string_append_kv (str, idt + 1, "EquivalentId", priv->equivalent_id);
+-	if (priv->physical_id != NULL)
+-		fu_common_string_append_kv (str, idt + 1, "PhysicalId", priv->physical_id);
++	if (physical_id != NULL)
++		fu_common_string_append_kv (str, idt + 1, "PhysicalId", physical_id);
+ 	if (priv->logical_id != NULL)
+ 		fu_common_string_append_kv (str, idt + 1, "LogicalId", priv->logical_id);
+ 	if (priv->size_min > 0) {
+@@ -2553,6 +2548,7 @@ fu_device_incorporate (FuDevice *self, FuDevice *donor)
+ 	FuDevicePrivate *priv_donor = GET_PRIVATE (donor);
+ 	GPtrArray *instance_ids = fu_device_get_instance_ids (donor);
+ 	GPtrArray *parent_guids = fu_device_get_parent_guids (donor);
++	const gchar * physical_id = fu_device_get_physical_id (donor);
+ 	g_autoptr(GList) metadata_keys = NULL;
+ 
+ 	g_return_if_fail (FU_IS_DEVICE (self));
+@@ -2563,8 +2559,8 @@ fu_device_incorporate (FuDevice *self, FuDevice *donor)
+ 		fu_device_set_alternate_id (self, fu_device_get_alternate_id (donor));
+ 	if (priv->equivalent_id == NULL)
+ 		fu_device_set_equivalent_id (self, fu_device_get_equivalent_id (donor));
+-	if (priv->physical_id == NULL && priv_donor->physical_id != NULL)
+-		fu_device_set_physical_id (self, priv_donor->physical_id);
++	if (fu_device_get_physical_id (self) == NULL && physical_id != NULL)
++		fu_device_set_physical_id (self, physical_id);
+ 	if (priv->logical_id == NULL && priv_donor->logical_id != NULL)
+ 		fu_device_set_logical_id (self, priv_donor->logical_id);
+ 	if (priv->quirks == NULL)
+@@ -2724,7 +2720,6 @@ fu_device_finalize (GObject *object)
+ 	g_ptr_array_unref (priv->possible_plugins);
+ 	g_free (priv->alternate_id);
+ 	g_free (priv->equivalent_id);
+-	g_free (priv->physical_id);
+ 	g_free (priv->logical_id);
+ 
+ 	G_OBJECT_CLASS (fu_device_parent_class)->finalize (object);
+diff --git a/src/fu-util-common.c b/src/fu-util-common.c
+index d73c64b..f66cbda 100644
+--- a/src/fu-util-common.c
++++ b/src/fu-util-common.c
+@@ -1255,6 +1255,12 @@ fu_util_device_to_string (FwupdDevice *dev, guint idt)
+ 		}
+ 	}
+ 
++	tmp = fwupd_device_get_physical_id (dev);
++	if (tmp != NULL) {
++		/* TRANSLATORS: Physical ID for hardware */
++		fu_common_string_append_kv (str, idt + 1, _("Physical ID"), tmp);
++	}
++
+ 	/* TRANSLATORS: description of device ability */
+ 	tmp = _("Device Flags");
+ 	for (guint i = 0; i < 64; i++) {

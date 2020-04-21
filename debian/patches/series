@@ -6,3 +6,4 @@ atari/Fix-compatibility-with-older-gnutls-versions.patch
 atari/Add-atari-plugin-for-vcs-controllers.patch
 atari/Skip-pkcs7-verify-data-test-on-older-gnutls.patch
 atari/Only-claim-usb-interface-in-bootloader-mode.patch
+atari/Expose-device-physical-id-to-clients.patch
