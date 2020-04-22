@@ -18,7 +18,7 @@ Signed-off-by: Sjoerd Simons <sjoerd@collabora.com>
  6 files changed, 84 insertions(+), 18 deletions(-)
 
 diff --git a/libfwupd/fwupd-device.c b/libfwupd/fwupd-device.c
-index 1a7a15e..95b1422 100644
+index 1a7a15e..0c4a1d6 100644
 --- a/libfwupd/fwupd-device.c
 +++ b/libfwupd/fwupd-device.c
 @@ -30,6 +30,7 @@ static void fwupd_device_finalize	 (GObject *object);
@@ -47,7 +47,7 @@ index 1a7a15e..95b1422 100644
 + * A sysfs or devpath is not a physical ID, but could be something like
 + * `PCI_SLOT_NAME=0000:3e:00.0`.
 + *
-+ * Since: 1.3.X
++ * Since: 1.3.9
 + **/
 +void
 +fwupd_device_set_physical_id (FwupdDevice *device, const gchar *physical_id)
@@ -70,7 +70,7 @@ index 1a7a15e..95b1422 100644
 + *
 + * Returns: a string value, or %NULL if never set.
 + *
-+ * Since: 1.3.X
++ * Since: 1.3.9
 + **/
 +const gchar *
 +fwupd_device_get_physical_id (FwupdDevice *device)
@@ -130,7 +130,7 @@ index 4118bfb..84484a5 100644
  #define FWUPD_RESULT_KEY_DETAILS_URL		"DetailsUrl"	/* s */
  #define FWUPD_RESULT_KEY_SOURCE_URL		"SourceUrl"	/* s */
 diff --git a/libfwupd/fwupd.map b/libfwupd/fwupd.map
-index efad9ce..34ffdaf 100644
+index efad9ce..877204c 100644
 --- a/libfwupd/fwupd.map
 +++ b/libfwupd/fwupd.map
 @@ -421,3 +421,10 @@ LIBFWUPD_1.3.7 {
@@ -138,7 +138,7 @@ index efad9ce..34ffdaf 100644
    local: *;
  } LIBFWUPD_1.3.6;
 +
-+LIBFWUPD_1.3.X {
++LIBFWUPD_1.3.9 {
 +  global:
 +    fwupd_device_get_physical_id;
 +    fwupd_device_set_physical_id;
