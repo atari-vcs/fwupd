@@ -9,16 +9,16 @@ already keeps.
 
 Signed-off-by: Sjoerd Simons <sjoerd@collabora.com>
 ---
- libfwupd/fwupd-device.c        | 54 ++++++++++++++++++++++++++++++++++++++++++
+ libfwupd/fwupd-device.c        | 58 ++++++++++++++++++++++++++++++++++++++++++
  libfwupd/fwupd-device.h        |  3 +++
  libfwupd/fwupd-enums-private.h |  1 +
- libfwupd/fwupd.map             |  7 ++++++
- libfwupdplugin/fu-device.c     | 31 ++++++++++--------------
+ libfwupd/fwupd.map             |  7 +++++
+ libfwupdplugin/fu-device.c     | 31 ++++++++++------------
  src/fu-util-common.c           |  6 +++++
- 6 files changed, 84 insertions(+), 18 deletions(-)
+ 6 files changed, 88 insertions(+), 18 deletions(-)
 
 diff --git a/libfwupd/fwupd-device.c b/libfwupd/fwupd-device.c
-index 1a7a15e..0c4a1d6 100644
+index 1a7a15e..0fd5ae1 100644
 --- a/libfwupd/fwupd-device.c
 +++ b/libfwupd/fwupd-device.c
 @@ -30,6 +30,7 @@ static void fwupd_device_finalize	 (GObject *object);
@@ -95,7 +95,18 @@ index 1a7a15e..0c4a1d6 100644
  	if (priv->icons->len > 0) {
  		const gchar * const *tmp = (const gchar * const *) priv->icons->pdata;
  		g_variant_builder_add (&builder, "{sv}",
-@@ -2114,6 +2167,7 @@ fwupd_device_finalize (GObject *object)
+@@ -1410,6 +1463,10 @@ fwupd_device_from_key_value (FwupdDevice *device, const gchar *key, GVariant *va
+ 			fwupd_device_add_instance_id (device, instance_ids[i]);
+ 		return;
+ 	}
++	if (g_strcmp0 (key, FWUPD_RESULT_KEY_PHYSICAL_ID) == 0) {
++		fwupd_device_set_physical_id (device, g_variant_get_string (value, NULL));
++		return;
++	}
+ 	if (g_strcmp0 (key, FWUPD_RESULT_KEY_ICON) == 0) {
+ 		g_autofree const gchar **icons = g_variant_get_strv (value, NULL);
+ 		for (guint i = 0; icons != NULL && icons[i] != NULL; i++)
+@@ -2114,6 +2171,7 @@ fwupd_device_finalize (GObject *object)
  	g_free (priv->description);
  	g_free (priv->id);
  	g_free (priv->parent_id);
