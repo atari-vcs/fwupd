@@ -1,0 +1,303 @@
+From: Sjoerd Simons <sjoerd@collabora.com>
+Date: Thu, 14 May 2020 13:54:16 +0200
+Subject: Add recognition for atari bluetooth devices
+
+When controllers are connected over bluetooth the normal atari plugin
+would pick them up (as it looks for usb devices). However we still need
+to determine if there is an update availble; For that create a dummy
+plugin that recognises the devices over blueooth, exposes a GUID that
+matches what it would look like on USB and fails with an error when
+trying to update.
+
+Signed-off-by: Sjoerd Simons <sjoerd@collabora.com>
+---
+ plugins/atari-bt/atari-bt.quirk       |   2 +
+ plugins/atari-bt/fu-atari-bt-device.c | 172 ++++++++++++++++++++++++++++++++++
+ plugins/atari-bt/fu-atari-bt-device.h |  12 +++
+ plugins/atari-bt/fu-plugin-atari-bt.c |  21 +++++
+ plugins/atari-bt/meson.build          |  28 ++++++
+ plugins/meson.build                   |   1 +
+ 6 files changed, 236 insertions(+)
+ create mode 100644 plugins/atari-bt/atari-bt.quirk
+ create mode 100644 plugins/atari-bt/fu-atari-bt-device.c
+ create mode 100644 plugins/atari-bt/fu-atari-bt-device.h
+ create mode 100644 plugins/atari-bt/fu-plugin-atari-bt.c
+ create mode 100644 plugins/atari-bt/meson.build
+
+diff --git a/plugins/atari-bt/atari-bt.quirk b/plugins/atari-bt/atari-bt.quirk
+new file mode 100644
+index 0000000..f9bda03
+--- /dev/null
++++ b/plugins/atari-bt/atari-bt.quirk
+@@ -0,0 +1,2 @@
++[DeviceInstanceId=HID]
++Plugin = atari_bt
+diff --git a/plugins/atari-bt/fu-atari-bt-device.c b/plugins/atari-bt/fu-atari-bt-device.c
+new file mode 100644
+index 0000000..cd267ee
+--- /dev/null
++++ b/plugins/atari-bt/fu-atari-bt-device.c
+@@ -0,0 +1,172 @@
++/*
++ * Copyright (C) 2020 Sjoerd Simons <sjoerd@collabora.com>
++ *
++ * SPDX-License-Identifier: LGPL-2.1+
++ */
++
++#include "config.h"
++
++#include <string.h>
++
++#include "fu-chunk.h"
++
++#include "fu-atari-bt-device.h"
++
++#define HID_BUS_BLUETOOTH 0x5
++
++#define ATARI_VID 0x3250
++
++#define ATARI_CLASSIC_PID 0x1001
++#define ATARI_MODERN_PID 0x1002
++
++
++struct _FuAtariBtDevice {
++	FuUdevDevice		 parent_instance;
++};
++
++G_DEFINE_TYPE (FuAtariBtDevice, fu_atari_bt_device, FU_TYPE_UDEV_DEVICE)
++
++static gboolean
++fu_atari_bt_device_prepare (FuDevice *device,
++			     FwupdInstallFlags flags,
++			     GError **error)
++{
++	g_set_error_literal (error,
++		     FWUPD_ERROR,
++		     FWUPD_ERROR_NEEDS_USER_ACTION,
++		     "Controller needs to be plugged into USB to complete the update");
++	return FALSE;
++}
++
++static gchar *
++fu_atari_bt_find_version (FuUdevDevice *device)
++{
++	GUdevDevice *udev_device = fu_udev_device_get_dev (device);
++	const gchar *subsystems[] = { "input", NULL };
++	g_autoptr (GUdevClient) udev = g_udev_client_new (subsystems);
++	g_autoptr (GUdevEnumerator) e = g_udev_enumerator_new (udev);
++	GList *devices, *l;
++	g_autofree gchar *version = NULL;
++	GString *bcd = g_string_sized_new (5);
++
++	devices = g_udev_enumerator_execute (e);
++
++	for (l = devices ; l != NULL; l = g_list_next (l)) {
++	  GUdevDevice *parent = g_udev_device_get_parent (l->data);
++
++	  if (!g_strcmp0 (g_udev_device_get_sysfs_path (udev_device),
++			  g_udev_device_get_sysfs_path (parent))) {
++		version = g_udev_device_get_sysfs_attr (l->data, "id/version");
++		break;
++	  }
++	}
++
++	if (version == NULL || strlen (version) != 4) {
++		g_string_append_printf (bcd, "0.00");
++	} else {
++		if (version[0] != '0')
++			g_string_append_c (bcd, version[0]);
++		g_string_append_c (bcd, version[1]);
++		g_string_append_c (bcd, '.');
++		if (version[2] != '0')
++			g_string_append_c (bcd, version[2]);
++		g_string_append_c (bcd, version[3]);
++	}
++
++	return g_string_free (bcd, FALSE);
++}
++
++static gboolean
++fu_atari_bt_device_probe (FuUdevDevice *device, GError **error)
++{
++	FuAtariBtDevice *self = FU_ATARI_BT_DEVICE (device);
++	const gchar *summary = "Atari game controller";
++	GUdevDevice *udev_device = fu_udev_device_get_dev (device);
++	g_autoptr(GUdevDevice) udev_parent = NULL;
++	const gchar *hid_id;
++	const gchar *hid_uniq;
++	const gchar *hid_name;
++	g_auto(GStrv) id_items = NULL;
++	guint64 vid, pid, bus;
++	g_autofree gchar *version = NULL;
++	g_autofree gchar *physical_id = NULL;
++	g_autofree gchar *guid = NULL;
++
++	hid_id = g_udev_device_get_property (udev_device, "HID_ID");
++	if (hid_id == NULL) {
++		g_set_error_literal (error,
++				     FWUPD_ERROR,
++				     FWUPD_ERROR_NOT_SUPPORTED,
++				     "No HID_ID set");
++		return FALSE;
++	}
++
++	/* HID_ID is <bus>:<vid>:<pid> */
++	id_items = g_strsplit(hid_id, ":", 3);
++
++	if (g_strv_length (id_items) != 3) {
++		g_set_error_literal (error,
++				     FWUPD_ERROR,
++				     FWUPD_ERROR_NOT_SUPPORTED,
++				     "Failed to parse HID_ID");
++		return FALSE;
++	}
++
++	bus = g_ascii_strtoull (id_items[0], NULL, 16);
++	vid = g_ascii_strtoull (id_items[1], NULL, 16);
++	pid = g_ascii_strtoull (id_items[2], NULL, 16);
++
++	if (bus != HID_BUS_BLUETOOTH ||
++	    vid != ATARI_VID ||
++	    (ATARI_CLASSIC_PID != pid  && ATARI_MODERN_PID != pid)) {
++		g_set_error_literal (error,
++				     FWUPD_ERROR,
++				     FWUPD_ERROR_NOT_SUPPORTED,
++				     "Unsupported device");
++		return FALSE;
++	}
++
++	hid_name = g_udev_device_get_property (udev_device, "HID_NAME");
++	fu_device_set_name (FU_DEVICE (device), hid_name);
++
++	/* Instance ID */
++	hid_uniq = g_udev_device_get_property (udev_device, "HID_UNIQ");
++	fu_device_set_id (FU_DEVICE (device), hid_uniq);
++
++	physical_id = g_strdup_printf("BLUETOOTH=%s", hid_uniq);
++	fu_device_set_physical_id (FU_DEVICE (self), physical_id);
++
++	guid = g_strdup_printf("USB\\VID_%04lX&PID_%04lX", vid,pid);
++	fu_device_add_guid (FU_DEVICE (device), guid);
++
++	/* allowed, but requires manual bootloader step */
++	fu_device_add_flag (FU_DEVICE (device), FWUPD_DEVICE_FLAG_UPDATABLE);
++
++	/* set name and vendor */
++	fu_device_set_vendor (FU_DEVICE (device), "Atari");
++	fu_device_set_vendor_id (FU_DEVICE (device), "HID:0x3250");
++
++	version = fu_atari_bt_find_version (device);
++	fu_device_set_version (FU_DEVICE (device), version, FWUPD_VERSION_FORMAT_BCD);
++
++	fu_device_set_summary (FU_DEVICE (device), summary);
++	fu_device_add_icon (FU_DEVICE (device), "input-gaming");
++
++	return TRUE;
++}
++
++static void
++fu_atari_bt_device_init (FuAtariBtDevice *self)
++{
++	fu_device_set_protocol (FU_DEVICE (self), "com.atarivcs.controller.hid");
++}
++
++static void
++fu_atari_bt_device_class_init (FuAtariBtDeviceClass *klass)
++{
++	FuDeviceClass *klass_device = FU_DEVICE_CLASS (klass);
++	FuUdevDeviceClass *klass_udev_device = FU_UDEV_DEVICE_CLASS (klass);
++
++	klass_device->prepare = fu_atari_bt_device_prepare;
++	klass_udev_device->probe = fu_atari_bt_device_probe;
++}
+diff --git a/plugins/atari-bt/fu-atari-bt-device.h b/plugins/atari-bt/fu-atari-bt-device.h
+new file mode 100644
+index 0000000..7a05849
+--- /dev/null
++++ b/plugins/atari-bt/fu-atari-bt-device.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright (C) 2020 Sjoerd Simons <sjoerd@collabora.com>
++ *
++ * SPDX-License-Identifier: LGPL-2.1+
++ */
++
++#pragma once
++
++#include "fu-plugin.h"
++
++#define FU_TYPE_ATARI_BT_DEVICE (fu_atari_bt_device_get_type ())
++G_DECLARE_FINAL_TYPE (FuAtariBtDevice, fu_atari_bt_device, FU, ATARI_BT_DEVICE, FuUdevDevice)
+diff --git a/plugins/atari-bt/fu-plugin-atari-bt.c b/plugins/atari-bt/fu-plugin-atari-bt.c
+new file mode 100644
+index 0000000..8fb3398
+--- /dev/null
++++ b/plugins/atari-bt/fu-plugin-atari-bt.c
+@@ -0,0 +1,21 @@
++/*
++ * Copyright (C) 2020 Sjoerd Simons <sjoerd@collabora.com>
++ *
++ * SPDX-License-Identifier: LGPL-2.1+
++ */
++
++#include "config.h"
++
++#include "fu-atari-bt-device.h"
++
++#include "fu-plugin-vfuncs.h"
++#include "fu-hash.h"
++
++void
++fu_plugin_init (FuPlugin *plugin)
++{
++	fu_plugin_add_udev_subsystem (plugin, "hid");
++
++	fu_plugin_set_build_hash (plugin, FU_BUILD_HASH);
++	fu_plugin_set_device_gtype (plugin, FU_TYPE_ATARI_BT_DEVICE);
++}
+diff --git a/plugins/atari-bt/meson.build b/plugins/atari-bt/meson.build
+new file mode 100644
+index 0000000..84f428c
+--- /dev/null
++++ b/plugins/atari-bt/meson.build
+@@ -0,0 +1,28 @@
++cargs = ['-DG_LOG_DOMAIN="FuPluginAtariBt"']
++
++install_data(['atari-bt.quirk'],
++  install_dir: join_paths(datadir, 'fwupd', 'quirks.d')
++)
++
++shared_module('fu_plugin_atari_bt',
++  fu_hash,
++  sources : [
++    'fu-plugin-atari-bt.c',
++    'fu-atari-bt-device.c',
++  ],
++  include_directories : [
++    root_incdir,
++    fwupd_incdir,
++    fwupdplugin_incdir,
++  ],
++  install : true,
++  install_dir: plugin_dir,
++  link_with : [
++    fwupd,
++    fwupdplugin,
++  ],
++  c_args : cargs,
++  dependencies : [
++    plugin_deps,
++  ],
++)
+diff --git a/plugins/meson.build b/plugins/meson.build
+index 278c082..94c8ab8 100644
+--- a/plugins/meson.build
++++ b/plugins/meson.build
+@@ -20,6 +20,7 @@ subdir('vli')
+ 
+ if get_option('gudev')
+ subdir('ata')
++subdir('atari-bt')
+ subdir('logitech-hidpp')
+ subdir('optionrom')
+ subdir('superio')
