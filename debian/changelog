@@ -1,3 +1,10 @@
+fwupd (1.3.9-3ata7) vcs; urgency=medium
+
+  * d/p/atari/Don-t-assume-compatible-devices-are-the-same-device.patch
+    + Added. Don't be too eager on assuming devices are the same.
+
+ -- Sjoerd Simons <sjoerd@collabora.com>  Fri, 22 May 2020 16:05:40 +0200
+
 fwupd (1.3.9-3ata6) vcs; urgency=medium
 
   * debian/patches/atari/Add-recognition-for-atari-bluetooth-devices.patch

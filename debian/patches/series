@@ -8,3 +8,4 @@ atari/Skip-pkcs7-verify-data-test-on-older-gnutls.patch
 atari/Only-claim-usb-interface-in-bootloader-mode.patch
 atari/Expose-device-physical-id-to-clients.patch
 atari/Add-recognition-for-atari-bluetooth-devices.patch
+atari/Don-t-assume-compatible-devices-are-the-same-device.patch

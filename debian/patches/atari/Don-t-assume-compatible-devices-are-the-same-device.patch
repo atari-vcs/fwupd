@@ -1,0 +1,27 @@
+From: Sjoerd Simons <sjoerd@collabora.com>
+Date: Fri, 22 May 2020 15:32:28 +0200
+Subject: Don't assume compatible devices are the same device
+
+When using multiple devices of the same type assuming a compatible
+device appearing means it's the same as an old device is probably a too
+big of a guess. Especially when you have multiple game controller of the
+same type.
+
+Signed-off-by: Sjoerd Simons <sjoerd@collabora.com>
+---
+ src/fu-device-list.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/fu-device-list.c b/src/fu-device-list.c
+index e44a8cb..2a3ef18 100644
+--- a/src/fu-device-list.c
++++ b/src/fu-device-list.c
+@@ -553,7 +553,7 @@ fu_device_list_add (FuDeviceList *self, FuDevice *device)
+ 	}
+ 
+ 	/* verify a compatible device does not already exist */
+-	item = fu_device_list_get_by_guids (self, fu_device_get_guids (device));
++	//item = fu_device_list_get_by_guids (self, fu_device_get_guids (device));
+ 	if (item == NULL) {
+ 		item = fu_device_list_find_by_connection (self,
+ 							  fu_device_get_physical_id (device),
