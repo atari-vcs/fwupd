@@ -1,3 +1,10 @@
+fwupd (1.3.9-3ata8) vcs; urgency=medium
+
+  * d/p/atari/atari-bt-get-version-from-driver-module-rather-then-hid.patch
+    + Added. Avoid getting wrong versions over bluetooth due to bluez caching
+
+ -- Sjoerd Simons <sjoerd@collabora.com>  Fri, 05 Jun 2020 12:10:03 +0200
+
 fwupd (1.3.9-3ata7) vcs; urgency=medium
 
   * d/p/atari/Don-t-assume-compatible-devices-are-the-same-device.patch

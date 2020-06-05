@@ -1,0 +1,60 @@
+From: Sjoerd Simons <sjoerd@collabora.com>
+Date: Fri, 5 Jun 2020 12:06:15 +0200
+Subject: atari-bt: get version from driver module rather then hid
+
+When a device is first paired bluez seems to cache its DiD; Which means
+that even if the firmware is updated the hid device will still have the
+version as cached and communicated by bluez to the kernel.
+
+To avoid that read the version from the driver (fw_version sysfs
+attribute) instead.
+
+Signed-off-by: Sjoerd Simons <sjoerd@collabora.com>
+---
+ plugins/atari-bt/fu-atari-bt-device.c | 21 +++------------------
+ 1 file changed, 3 insertions(+), 18 deletions(-)
+
+diff --git a/plugins/atari-bt/fu-atari-bt-device.c b/plugins/atari-bt/fu-atari-bt-device.c
+index cd267ee..9fb585a 100644
+--- a/plugins/atari-bt/fu-atari-bt-device.c
++++ b/plugins/atari-bt/fu-atari-bt-device.c
+@@ -39,28 +39,13 @@ fu_atari_bt_device_prepare (FuDevice *device,
+ }
+ 
+ static gchar *
+-fu_atari_bt_find_version (FuUdevDevice *device)
++fu_atari_bt_get_version (FuUdevDevice *device)
+ {
+ 	GUdevDevice *udev_device = fu_udev_device_get_dev (device);
+-	const gchar *subsystems[] = { "input", NULL };
+-	g_autoptr (GUdevClient) udev = g_udev_client_new (subsystems);
+-	g_autoptr (GUdevEnumerator) e = g_udev_enumerator_new (udev);
+-	GList *devices, *l;
+ 	g_autofree gchar *version = NULL;
+ 	GString *bcd = g_string_sized_new (5);
+ 
+-	devices = g_udev_enumerator_execute (e);
+-
+-	for (l = devices ; l != NULL; l = g_list_next (l)) {
+-	  GUdevDevice *parent = g_udev_device_get_parent (l->data);
+-
+-	  if (!g_strcmp0 (g_udev_device_get_sysfs_path (udev_device),
+-			  g_udev_device_get_sysfs_path (parent))) {
+-		version = g_udev_device_get_sysfs_attr (l->data, "id/version");
+-		break;
+-	  }
+-	}
+-
++	version = g_udev_device_get_sysfs_attr (udev_device, "fw_version");
+ 	if (version == NULL || strlen (version) != 4) {
+ 		g_string_append_printf (bcd, "0.00");
+ 	} else {
+@@ -146,7 +131,7 @@ fu_atari_bt_device_probe (FuUdevDevice *device, GError **error)
+ 	fu_device_set_vendor (FU_DEVICE (device), "Atari");
+ 	fu_device_set_vendor_id (FU_DEVICE (device), "HID:0x3250");
+ 
+-	version = fu_atari_bt_find_version (device);
++	version = fu_atari_bt_get_version (device);
+ 	fu_device_set_version (FU_DEVICE (device), version, FWUPD_VERSION_FORMAT_BCD);
+ 
+ 	fu_device_set_summary (FU_DEVICE (device), summary);
