@@ -1,3 +1,11 @@
+fwupd (1.3.9-3ata11) vcs; urgency=medium
+
+  * d/p/atari/Only-set-remove-delay-when-removing.patch
+    + Don't set remove delays unless programmatically removing to avoid
+      switching between controllers causing them to be seen as equivalent.
+
+ -- Sjoerd Simons <sjoerd@collabora.com>  Mon, 08 Jun 2020 21:33:05 +0200
+
 fwupd (1.3.9-3ata10) vcs; urgency=medium
 
   * Fix previously introduced patch

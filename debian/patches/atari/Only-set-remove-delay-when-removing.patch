@@ -1,0 +1,44 @@
+From: Sjoerd Simons <sjoerd@collabora.com>
+Date: Mon, 8 Jun 2020 21:15:31 +0200
+Subject: Only set remove delay when removing
+
+If a remove delay is configured then whenever a device is removed fwupd
+it will assume a new device being plugged in at the same port is
+actually the same device.
+
+Only set the remove delay when actaully programmatically removing
+devices.
+
+Signed-off-by: Sjoerd Simons <sjoerd@collabora.com>
+---
+ plugins/atari/fu-atari-device.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/plugins/atari/fu-atari-device.c b/plugins/atari/fu-atari-device.c
+index 6496cb6..51987e9 100644
+--- a/plugins/atari/fu-atari-device.c
++++ b/plugins/atari/fu-atari-device.c
+@@ -188,6 +188,7 @@ fu_atari_device_attach (FuDevice *device, GError **error)
+ 	if (!fu_atari_device_send_cmd (FU_ATARI_DEVICE (device), cmd, error))
+ 		return  FALSE;
+ 
++	fu_device_set_remove_delay (device, FU_DEVICE_REMOVE_DELAY_RE_ENUMERATE);
+ 	fu_device_set_status (device, FWUPD_STATUS_DEVICE_RESTART);
+ 	fu_device_add_flag (device, FWUPD_DEVICE_FLAG_WAIT_FOR_REPLUG);
+ 
+@@ -218,6 +219,7 @@ fu_atari_device_detach (FuDevice *device, GError **error)
+ 			error))
+ 		return FALSE;
+ 
++	fu_device_set_remove_delay (device, FU_DEVICE_REMOVE_DELAY_RE_ENUMERATE);
+ 	fu_device_set_status (device, FWUPD_STATUS_DEVICE_RESTART);
+ 	fu_device_add_flag (device, FWUPD_DEVICE_FLAG_WAIT_FOR_REPLUG);
+ 
+@@ -368,7 +370,6 @@ fu_atari_device_probe (FuUsbDevice *device, GError **error)
+ 
+ 	/* allowed, but requires manual bootloader step */
+ 	fu_device_add_flag (FU_DEVICE (device), FWUPD_DEVICE_FLAG_UPDATABLE);
+-	fu_device_set_remove_delay (FU_DEVICE (device), FU_DEVICE_REMOVE_DELAY_USER_REPLUG);
+ 
+ 	/* set name and vendor */
+ 
