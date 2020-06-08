@@ -12,7 +12,7 @@ Signed-off-by: Sjoerd Simons <sjoerd@collabora.com>
  1 file changed, 22 insertions(+), 2 deletions(-)
 
 diff --git a/plugins/atari-bt/fu-atari-bt-device.c b/plugins/atari-bt/fu-atari-bt-device.c
-index 9fb585a..b6ae5f8 100644
+index 9fb585a..ff997a5 100644
 --- a/plugins/atari-bt/fu-atari-bt-device.c
 +++ b/plugins/atari-bt/fu-atari-bt-device.c
 @@ -44,8 +44,27 @@ fu_atari_bt_get_version (FuUdevDevice *device)
@@ -32,7 +32,7 @@ index 9fb585a..b6ae5f8 100644
 +		int ret = g_file_load_contents (file, NULL, &version,
 +						NULL, NULL, &error);
 +
-+		if (!ret) {
++		if (ret) {
 +			version = g_strchomp (version);
 +			break;
 +		}
