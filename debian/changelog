@@ -1,3 +1,10 @@
+fwupd (1.3.9-3ata9) vcs; urgency=medium
+
+  * d/p/Poll-fw_version-file.patch
+    + Added poll atari bt version until some useful info appears
+
+ -- Sjoerd Simons <sjoerd@collabora.com>  Mon, 08 Jun 2020 14:27:27 +0200
+
 fwupd (1.3.9-3ata8) vcs; urgency=medium
 
   * d/p/atari/atari-bt-get-version-from-driver-module-rather-then-hid.patch

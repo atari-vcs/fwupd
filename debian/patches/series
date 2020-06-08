@@ -10,3 +10,4 @@ atari/Expose-device-physical-id-to-clients.patch
 atari/Add-recognition-for-atari-bluetooth-devices.patch
 atari/Don-t-assume-compatible-devices-are-the-same-device.patch
 atari/atari-bt-get-version-from-driver-module-rather-then-hid.patch
+atari/Poll-fw_version-file.patch

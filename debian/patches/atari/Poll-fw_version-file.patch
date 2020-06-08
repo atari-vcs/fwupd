@@ -1,0 +1,56 @@
+From: Sjoerd Simons <sjoerd@collabora.com>
+Date: Mon, 8 Jun 2020 14:25:49 +0200
+Subject: Poll fw_version file
+
+Unfortunately the kernel uevents happen *before* all information from
+the remote device has been received. To hack around this for now poll
+the version file for up to 2.5 seconds at probe time...
+
+Signed-off-by: Sjoerd Simons <sjoerd@collabora.com>
+---
+ plugins/atari-bt/fu-atari-bt-device.c | 24 ++++++++++++++++++++++--
+ 1 file changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/plugins/atari-bt/fu-atari-bt-device.c b/plugins/atari-bt/fu-atari-bt-device.c
+index 9fb585a..b6ae5f8 100644
+--- a/plugins/atari-bt/fu-atari-bt-device.c
++++ b/plugins/atari-bt/fu-atari-bt-device.c
+@@ -44,8 +44,27 @@ fu_atari_bt_get_version (FuUdevDevice *device)
+ 	GUdevDevice *udev_device = fu_udev_device_get_dev (device);
+ 	g_autofree gchar *version = NULL;
+ 	GString *bcd = g_string_sized_new (5);
++	g_autoptr (GFile) file = NULL;
++	int i;
++
++	/* TODO Avoid poll in some way */
++	file = g_file_new_build_filename (g_udev_device_get_sysfs_path (udev_device),
++					  "fw_version",
++					  NULL);
++
++	for (i = 0 ; i < 25 ; i++) {
++		g_autoptr (GError) error = NULL;
++		int ret = g_file_load_contents (file, NULL, &version,
++						NULL, NULL, &error);
++
++		if (!ret) {
++			version = g_strchomp (version);
++			break;
++		}
++
++		g_usleep (G_USEC_PER_SEC/10);
++	}
+ 
+-	version = g_udev_device_get_sysfs_attr (udev_device, "fw_version");
+ 	if (version == NULL || strlen (version) != 4) {
+ 		g_string_append_printf (bcd, "0.00");
+ 	} else {
+@@ -132,7 +151,8 @@ fu_atari_bt_device_probe (FuUdevDevice *device, GError **error)
+ 	fu_device_set_vendor_id (FU_DEVICE (device), "HID:0x3250");
+ 
+ 	version = fu_atari_bt_get_version (device);
+-	fu_device_set_version (FU_DEVICE (device), version, FWUPD_VERSION_FORMAT_BCD);
++	if (version != NULL)
++		fu_device_set_version (FU_DEVICE (device), version, FWUPD_VERSION_FORMAT_BCD);
+ 
+ 	fu_device_set_summary (FU_DEVICE (device), summary);
+ 	fu_device_add_icon (FU_DEVICE (device), "input-gaming");
